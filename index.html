@@ -287,6 +287,7 @@ function buildView(v){
     <div class="view-body">
       <div class="types" id="types_${v}"></div>
       <div class="field-row" id="controls_${v}"></div>
+      <div class="field-row cond-row" id="filter_${v}"></div>
       <div class="field-row cond-row" id="cond_${v}"></div>
       <div class="colors" id="colors_${v}"></div>
       <div id="msg_${v}"></div>
@@ -341,8 +342,68 @@ function buildControls(v){
   }else if(t==='pie'){gid('xSel',v).value=cats[0]||all[0];}
   else if(t==='scatter'){const o=nums.length?nums:all;gid('xSel',v).value=o[0];gid('ySel',v).value=o[1]||o[0];}
   c.querySelectorAll('select,input').forEach(el=>el.addEventListener('change',()=>render(v)));
+  buildFilter(v);
   buildCond(v);
   render(v);
+}
+
+function buildFilter(v){
+  const box=gid('filter',v),all=state.columns.map(c=>c.name);
+  const ops=[['>','&gt;'],['>=','≥'],['<','&lt;'],['<=','≤'],['==','＝'],['!=','≠'],['between','介於'],['max','最大 N 筆'],['min','最小 N 筆']];
+  box.innerHTML=`
+    <div class="field"><label>資料篩選</label><select id="fOn_${v}"><option value="off">關閉</option><option value="on">啟用</option></select></div>
+    <div class="field"><label>篩選欄位</label><select id="fCol_${v}">${all.map(o=>`<option>${escapeHtml(o)}</option>`).join('')}</select></div>
+    <div class="field"><label>條件</label><select id="fOp_${v}">${ops.map(o=>`<option value="${o[0]}">${o[1]}</option>`).join('')}</select></div>
+    <div class="field" id="fTgtWrap_${v}"><label>比較對象</label><select id="fTgt_${v}"><option value="num">數值</option><option value="col">另一欄位</option></select></div>
+    <div class="field" id="fValWrap_${v}"><label>值</label><input type="text" id="fVal_${v}" placeholder="例如 1000 或 台北"></div>
+    <div class="field hidden" id="fVal2Wrap_${v}"><label>到</label><input type="number" id="fVal2_${v}"></div>
+    <div class="field hidden" id="fCol2Wrap_${v}"><label>比較欄位</label><select id="fCol2_${v}">${all.map(o=>`<option>${escapeHtml(o)}</option>`).join('')}</select></div>
+    <div class="field hidden" id="fNWrap_${v}"><label>筆數 N</label><input type="number" id="fN_${v}" value="5" min="1"></div>
+    <span class="note" id="fmsg_${v}" style="width:100%"></span>`;
+  const firstNum=numCols()[0];if(firstNum)gid('fCol',v).value=firstNum.name;
+  const all2=state.columns.filter(c=>c.name!==(firstNum&&firstNum.name));if(all2[0])gid('fCol2',v).value=all2[0].name;
+  const sync=()=>{
+    const op=gid('fOp',v).value,tgt=gid('fTgt',v).value,mm=(op==='max'||op==='min');
+    gid('fTgtWrap',v).classList.toggle('hidden',mm);
+    gid('fValWrap',v).classList.toggle('hidden',mm||tgt==='col');
+    gid('fVal2Wrap',v).classList.toggle('hidden',op!=='between'||tgt==='col');
+    gid('fCol2Wrap',v).classList.toggle('hidden',mm||tgt!=='col');
+    gid('fNWrap',v).classList.toggle('hidden',!mm);
+  };
+  gid('fOp',v).addEventListener('change',sync);gid('fTgt',v).addEventListener('change',sync);sync();
+  box.querySelectorAll('select,input').forEach(el=>{el.addEventListener('change',()=>render(v));if(el.type==='text')el.addEventListener('input',()=>render(v))});
+}
+
+function applyFilter(v,rows){
+  const onEl=gid('fOn',v),note=gid('fmsg',v);
+  if(!onEl||onEl.value!=='on'){if(note)note.textContent='';return rows}
+  const col=gid('fCol',v).value,op=gid('fOp',v).value,tgt=gid('fTgt',v).value;
+  let out;
+  if(op==='max'||op==='min'){
+    const n=Math.max(1,parseInt(gid('fN',v).value)||1);
+    const withNum=rows.map(r=>({r,n:toNum(r[col])})).filter(o=>!isNaN(o.n));
+    withNum.sort((a,b)=>op==='max'?b.n-a.n:a.n-b.n);
+    out=withNum.slice(0,n).map(o=>o.r);
+  }else{
+    const rawVal=(gid('fVal',v).value||'').trim(),val=Number(rawVal),val2=Number(gid('fVal2',v).value),col2=gid('fCol2',v).value;
+    out=rows.filter(r=>{
+      const L=toNum(r[col]),R=tgt==='col'?toNum(r[col2]):val;
+      if(op==='between'){if(tgt==='col')return true;return !isNaN(L)&&!isNaN(val)&&!isNaN(val2)&&L>=Math.min(val,val2)&&L<=Math.max(val,val2)}
+      if(op==='=='||op==='!='){let eq;
+        if(tgt==='col'){const a=toNum(r[col]),b=toNum(r[col2]);eq=(!isNaN(a)&&!isNaN(b))?a===b:String(r[col])===String(r[col2])}
+        else{const a=toNum(r[col]);eq=(!isNaN(a)&&!isNaN(val)&&rawVal!=='')?a===val:String(r[col])===rawVal}
+        return op==='=='?eq:!eq}
+      if(isNaN(L)||isNaN(R))return false;
+      switch(op){case'>':return L>R;case'>=':return L>=R;case'<':return L<R;case'<=':return L<=R}
+      return true;
+    });
+  }
+  if(note){
+    const sym={'>':'>','>=':'≥','<':'<','<=':'≤','==':'=','!=':'≠','between':'介於'}[op];
+    const desc=(op==='max'||op==='min')?`取「${col}」${op==='max'?'最大':'最小'} ${Math.max(1,parseInt(gid('fN',v).value)||1)} 筆`:`「${col}」 ${sym} ${tgt==='col'?'「'+gid('fCol2',v).value+'」':(gid('fVal',v).value||'?')}`;
+    note.innerHTML=`篩選:${escapeHtml(desc)} → 顯示 <b>${out.length.toLocaleString()}</b> / ${rows.length.toLocaleString()} 列`;
+  }
+  return out;
 }
 
 function buildCond(v){
@@ -389,7 +450,8 @@ function colorFor(v,label,i){const map=state.views[v].colors;if(!map[label])map[
 /* ---------- render ---------- */
 function render(v){
   clearMsg(`msg_${v}`);
-  const t=state.views[v].type,rows=state.rows;let cfg,seriesLabels=[];
+  const t=state.views[v].type;let cfg,seriesLabels=[];
+  const rows=applyFilter(v,state.rows);
   try{
     if(t==='bar'||t==='line'||t==='points'){
       const xCol=gid('xSel',v).value;
