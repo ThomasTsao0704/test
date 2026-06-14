@@ -102,6 +102,8 @@
     background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
     background-size:22px 22px;border:1px solid var(--line);border-radius:3px;padding:14px;position:relative;height:360px}
 
+  .cond-row{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+  .cond-row:empty{display:none}
   .colors{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 4px;padding-top:12px;border-top:1px dashed var(--line)}
   .color-item{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-soft)}
   .color-item input[type=color]{-webkit-appearance:none;appearance:none;width:24px;height:24px;border:1.5px solid var(--line);border-radius:4px;padding:0;background:none;cursor:pointer;min-width:24px}
@@ -285,6 +287,7 @@ function buildView(v){
     <div class="view-body">
       <div class="types" id="types_${v}"></div>
       <div class="field-row" id="controls_${v}"></div>
+      <div class="field-row cond-row" id="cond_${v}"></div>
       <div class="colors" id="colors_${v}"></div>
       <div id="msg_${v}"></div>
       <div class="chart-card"><canvas id="canvas_${v}"></canvas></div>
@@ -338,7 +341,30 @@ function buildControls(v){
   }else if(t==='pie'){gid('xSel',v).value=cats[0]||all[0];}
   else if(t==='scatter'){const o=nums.length?nums:all;gid('xSel',v).value=o[0];gid('ySel',v).value=o[1]||o[0];}
   c.querySelectorAll('select,input').forEach(el=>el.addEventListener('change',()=>render(v)));
+  buildCond(v);
   render(v);
+}
+
+function buildCond(v){
+  const box=gid('cond',v),t=state.views[v].type;
+  if(!['bar','line','points','scatter'].includes(t)){box.innerHTML='';return}
+  const ops=[['>','&gt;'],['>=','≥'],['<','&lt;'],['<=','≤'],['==','＝'],['!=','≠'],['between','介於']];
+  box.innerHTML=`
+    <div class="field"><label>條件標記（依據）</label>
+      <select id="condOn_${v}"><option value="off">關閉</option><option value="X">依 X 值</option><option value="Y">依 Y 值</option></select></div>
+    <div class="field"><label>運算子</label>
+      <select id="condOp_${v}">${ops.map(o=>`<option value="${o[0]}">${o[1]}</option>`).join('')}</select></div>
+    <div class="field"><label>值</label><input type="text" id="condVal_${v}" placeholder="例如 1000 或 台北"></div>
+    <div class="field condBetween hidden" id="condBetweenWrap_${v}"><label>到</label><input type="number" id="condVal2_${v}"></div>
+    <div class="field"><label>進階公式（選填）</label><input type="text" id="condExpr_${v}" placeholder="用 x、y，如 y>1000 && x!='其他'" style="min-width:210px"></div>
+    <div class="field"><label>標記色</label><input type="color" id="condColor_${v}" value="#D9533B" style="-webkit-appearance:none;appearance:none;width:42px;height:36px;border:1.5px solid var(--line);border-radius:4px;padding:2px;cursor:pointer"></div>`;
+  const toggleBetween=()=>{gid('condBetweenWrap',v).classList.toggle('hidden',gid('condOp',v).value!=='between')};
+  gid('condOp',v).addEventListener('change',toggleBetween);
+  toggleBetween();
+  box.querySelectorAll('select,input').forEach(el=>{
+    el.addEventListener('change',()=>render(v));
+    if(el.type==='text'||el.type==='color')el.addEventListener('input',()=>render(v));
+  });
 }
 
 /* ---------- agg / pivot ---------- */
@@ -410,9 +436,53 @@ function render(v){
       const h=histogram(rows,col,bins),label=`${col} 次數分布`;seriesLabels=[label];const c=colorFor(v,label,0);
       cfg={type:'bar',data:{labels:h.labels,datasets:[{label,data:h.counts,backgroundColor:hexA(c,.8),borderColor:c,borderWidth:1,barPercentage:1,categoryPercentage:1}]},options:baseOpts(true,false)};
     }
+    applyConditionMaybe(v,t,cfg);
     draw(v,cfg);
     renderColors(v,seriesLabels);
   }catch(err){showErr(`msg_${v}`,'繪製時發生問題,換個欄位組合試試。');console.error(err)}
+}
+
+function evalCond(spec,xVal,yVal){
+  if(spec.fn){try{return !!spec.fn(xVal,toNum(yVal))}catch(e){return false}}
+  const target=spec.on==='X'?xVal:yVal;
+  if(spec.op==='between'){const n=toNum(target);return !isNaN(n)&&!isNaN(spec.val)&&!isNaN(spec.val2)&&n>=Math.min(spec.val,spec.val2)&&n<=Math.max(spec.val,spec.val2)}
+  if(spec.op==='=='||spec.op==='!='){const n=toNum(target),m=Number(spec.rawVal);let eq;if(!isNaN(n)&&!isNaN(m)&&spec.rawVal!=='')eq=(n===m);else eq=(String(target)===spec.rawVal);return spec.op==='=='?eq:!eq}
+  const n=toNum(target);if(isNaN(n)||isNaN(spec.val))return false;
+  switch(spec.op){case'>':return n>spec.val;case'>=':return n>=spec.val;case'<':return n<spec.val;case'<=':return n<=spec.val}
+  return false;
+}
+function applyConditionMaybe(v,t,cfg){
+  const onEl=gid('condOn',v);if(!onEl||!['bar','line','points','scatter'].includes(t))return;
+  const onSel=onEl.value,exprRaw=(gid('condExpr',v).value||'').trim();
+  if(onSel==='off'&&!exprRaw)return;
+  let fn=null;
+  if(exprRaw){try{fn=new Function('x','y','"use strict";return ('+exprRaw+')')}catch(e){$(`msg_${v}`).insertAdjacentHTML('beforeend',`<p class="note" style="color:var(--warn)">進階公式語法有誤,已略過標記。</p>`);return}}
+  const spec={on:onSel==='X'?'X':'Y',op:gid('condOp',v).value,val:Number(gid('condVal',v).value),val2:Number(gid('condVal2',v).value),rawVal:(gid('condVal',v).value||'').trim(),fn};
+  const hi=gid('condColor',v).value||'#D9533B';
+  let total=0;
+  cfg.data.datasets.forEach(ds=>{
+    const base=ds.borderColor||hi;
+    if(t==='scatter'){
+      const mask=ds.data.map(p=>evalCond(spec,p.x,p.y));total+=mask.filter(Boolean).length;
+      ds.pointBackgroundColor=mask.map(m=>m?hi:hexA(base,.22));
+      ds.pointBorderColor=mask.map(m=>m?hi:hexA(base,.22));
+      ds.pointRadius=mask.map(m=>m?5:3);
+    }else{
+      const labels=cfg.data.labels;
+      const mask=ds.data.map((y,i)=>evalCond(spec,labels[i],y));total+=mask.filter(Boolean).length;
+      if(t==='bar'){
+        ds.backgroundColor=mask.map(m=>m?hexA(hi,.9):hexA(base,.2));
+        ds.borderColor=mask.map(m=>m?hi:hexA(base,.4));
+      }else{
+        ds.pointBackgroundColor=mask.map(m=>m?hi:hexA(base,t==='line'?1:.22));
+        ds.pointBorderColor=mask.map(m=>m?hi:hexA(base,.22));
+        ds.pointBorderWidth=2;
+        ds.pointRadius=mask.map(m=>t==='line'?(m?6:0):(m?6:3));
+      }
+    }
+  });
+  const onTxt=onSel==='off'?'公式':(onSel==='X'?'X 值':'Y 值');
+  $(`msg_${v}`).insertAdjacentHTML('beforeend',`<p class="note">條件標記（依${onTxt}）:共 <b style="color:${hi}">${total}</b> 個資料點符合,以標記色顯示。</p>`);
 }
 
 function mkDS(type,label,data,color,lw,stacked,ptKey){
