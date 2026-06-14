@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>繪圖檯 · Plotsheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --paper:#F6F7F1;
+    --paper-card:#FCFDFA;
+    --grid:#E5EADD;
+    --grid-bold:#D6DDC9;
+    --ink:#1F262A;
+    --ink-soft:#5C6670;
+    --ink-faint:#8A9098;
+    --line:#D2D8C9;
+    --accent:#1F6F5C;
+    --accent-deep:#185647;
+    --accent-soft:#E2EFE9;
+    --warn:#9A4A33;
+    --warn-soft:#F4E6E0;
+    --radius:4px;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --display:'Space Grotesk','Noto Sans TC',system-ui,sans-serif;
+    --body:'Noto Sans TC',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--body);
+    color:var(--ink);
+    background-color:var(--paper);
+    background-image:
+      linear-gradient(var(--grid) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+    background-size:24px 24px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px 80px}
+
+  /* ---------- Header ---------- */
+  header.top{padding:34px 0 26px;border-bottom:1.5px solid var(--ink);margin-bottom:30px}
+  .brand{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .mark{
+    font-family:var(--display);font-weight:700;font-size:30px;letter-spacing:-0.5px;color:var(--ink);
+    display:inline-flex;align-items:center;gap:10px;
+  }
+  .mark .pen{
+    width:26px;height:26px;border:2px solid var(--accent);border-radius:50%;
+    position:relative;flex:none;
+  }
+  .mark .pen::after{
+    content:"";position:absolute;inset:6px;background:var(--accent);border-radius:50%;
+  }
+  .mark .sub{font-family:var(--mono);font-weight:500;font-size:13px;color:var(--ink-faint);letter-spacing:1px;text-transform:uppercase}
+  .tagline{margin-top:10px;color:var(--ink-soft);font-size:14.5px;max-width:560px}
+  .privacy-badge{
+    display:inline-flex;align-items:center;gap:7px;margin-top:14px;
+    font-family:var(--mono);font-size:11.5px;letter-spacing:0.3px;
+    color:var(--accent-deep);background:var(--accent-soft);
+    border:1px solid var(--accent);padding:5px 11px;border-radius:100px;
+  }
+  .privacy-badge .dot{width:7px;height:7px;background:var(--accent);border-radius:50%}
+
+  /* ---------- Section ---------- */
+  .panel{
+    background:var(--paper-card);border:1.5px solid var(--ink);border-radius:var(--radius);
+    margin-bottom:22px;
+  }
+  .panel-head{
+    display:flex;align-items:center;gap:11px;padding:13px 18px;border-bottom:1px solid var(--line);
+  }
+  .panel-num{
+    font-family:var(--mono);font-weight:600;font-size:12px;color:var(--paper-card);
+    background:var(--ink);width:24px;height:24px;border-radius:3px;
+    display:grid;place-items:center;flex:none;
+  }
+  .panel-title{font-family:var(--display);font-weight:600;font-size:16px}
+  .panel-title .en{font-family:var(--mono);font-weight:400;font-size:11.5px;color:var(--ink-faint);margin-left:8px;letter-spacing:0.5px}
+  .panel-body{padding:18px}
+
+  /* ---------- Dropzone ---------- */
+  .drop{
+    border:2px dashed var(--line);border-radius:var(--radius);
+    background-color:var(--paper);
+    background-image:
+      linear-gradient(var(--grid-bold) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid-bold) 1px,transparent 1px);
+    background-size:18px 18px;
+    padding:46px 24px;text-align:center;cursor:pointer;
+    transition:border-color .18s,background-color .18s;
+  }
+  .drop:hover,.drop.drag{border-color:var(--accent);background-color:var(--accent-soft)}
+  .drop .icon{
+    width:46px;height:56px;margin:0 auto 16px;border:2px solid var(--accent);border-radius:3px;
+    position:relative;background:var(--paper-card);
+  }
+  .drop .icon::before{content:"";position:absolute;top:9px;left:9px;right:9px;height:2px;background:var(--accent);box-shadow:0 7px var(--accent),0 14px var(--accent)}
+  .drop .icon::after{content:"";position:absolute;top:-2px;right:-2px;border-width:0 12px 12px 0;border-style:solid;border-color:transparent var(--paper-card) transparent transparent}
+  .drop h3{font-family:var(--display);font-weight:600;font-size:17px;margin-bottom:6px}
+  .drop p{color:var(--ink-soft);font-size:13.5px}
+  .drop .browse{color:var(--accent);font-weight:600;text-decoration:underline;text-underline-offset:2px}
+
+  /* ---------- Controls / fields ---------- */
+  .field-row{display:flex;flex-wrap:wrap;gap:18px}
+  .field{display:flex;flex-direction:column;gap:6px;min-width:150px}
+  .field label{font-family:var(--mono);font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:var(--ink-soft)}
+  select,input[type=number]{
+    font-family:var(--body);font-size:14px;color:var(--ink);
+    background:var(--paper-card);border:1.5px solid var(--line);border-radius:3px;
+    padding:8px 10px;min-width:140px;
+  }
+  select:focus,input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+
+  .encoding-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;font-size:13px}
+  .encoding-bar .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.5px;color:var(--ink-soft);text-transform:uppercase}
+
+  /* chart type segmented */
+  .types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+  .type-btn{
+    font-family:var(--body);font-size:13.5px;font-weight:500;color:var(--ink-soft);
+    background:var(--paper-card);border:1.5px solid var(--line);border-radius:3px;
+    padding:8px 14px;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:7px;
+  }
+  .type-btn:hover{border-color:var(--accent);color:var(--ink)}
+  .type-btn.on{background:var(--ink);color:var(--paper-card);border-color:var(--ink)}
+  .type-btn .rec{font-family:var(--mono);font-size:9.5px;background:var(--accent);color:#fff;padding:1px 5px;border-radius:100px;letter-spacing:.3px}
+
+  /* y multi checkboxes */
+  .ychips{display:flex;flex-wrap:wrap;gap:8px}
+  .ychip{
+    font-size:13px;border:1.5px solid var(--line);border-radius:3px;padding:6px 11px;cursor:pointer;
+    background:var(--paper-card);transition:all .15s;user-select:none;display:inline-flex;align-items:center;gap:7px;
+  }
+  .ychip:hover{border-color:var(--accent)}
+  .ychip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-deep);font-weight:500}
+  .ychip .sw{width:11px;height:11px;border-radius:2px;border:1.5px solid var(--ink-faint)}
+  .ychip.on .sw{background:var(--accent);border-color:var(--accent)}
+
+  /* table */
+  .table-scroll{overflow:auto;border:1px solid var(--line);border-radius:3px;max-height:340px}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{padding:7px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+  thead th{position:sticky;top:0;background:var(--paper-card);border-bottom:1.5px solid var(--ink);z-index:1}
+  .col-name{font-family:var(--display);font-weight:600;font-size:13px}
+  .col-type{display:inline-block;font-family:var(--mono);font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px;border-radius:100px;margin-left:8px;vertical-align:middle}
+  .t-number{background:var(--accent-soft);color:var(--accent-deep)}
+  .t-date{background:#E6E9F2;color:#3A4A78}
+  .t-text{background:#EFEDE6;color:#6B5F44}
+  td.num{font-family:var(--mono);text-align:right;color:var(--ink)}
+  tbody tr:nth-child(even){background:rgba(0,0,0,.018)}
+  .meta-line{font-family:var(--mono);font-size:12px;color:var(--ink-soft);margin-bottom:12px}
+  .meta-line b{color:var(--accent-deep)}
+
+  /* chart */
+  .chart-card{
+    background-color:var(--paper-card);
+    background-image:
+      linear-gradient(var(--grid) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+    background-size:22px 22px;
+    border:1px solid var(--line);border-radius:3px;padding:18px;
+    position:relative;height:440px;
+  }
+  .chart-actions{display:flex;justify-content:flex-end;margin-top:12px}
+  .btn{
+    font-family:var(--body);font-size:13.5px;font-weight:500;cursor:pointer;
+    border:1.5px solid var(--ink);border-radius:3px;padding:8px 16px;
+    background:var(--ink);color:var(--paper-card);transition:all .15s;
+  }
+  .btn:hover{background:var(--accent);border-color:var(--accent)}
+  .btn.ghost{background:transparent;color:var(--ink)}
+  .btn.ghost:hover{background:var(--accent-soft);color:var(--accent-deep);border-color:var(--accent)}
+
+  .note{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);margin-top:10px}
+  .hidden{display:none!important}
+  .msg{padding:11px 14px;border-radius:3px;font-size:13.5px;margin-top:14px}
+  .msg.err{background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn)}
+
+  footer{margin-top:40px;padding-top:20px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);text-align:center;letter-spacing:.3px}
+
+  @media (max-width:560px){
+    .mark{font-size:24px}
+    .panel-body{padding:14px}
+    .field{min-width:130px}
+    .chart-card{height:360px;padding:12px}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <span class="mark"><span class="pen"></span>繪圖檯</span>
+      <span class="sub">Plotsheet</span>
+    </div>
+    <p class="tagline">把一份 CSV 攤在繪圖紙上,挑兩個欄位,就能看見它的形狀。從上傳到圖表,全程在你的瀏覽器裡完成。</p>
+    <span class="privacy-badge"><span class="dot"></span>資料不會離開這個裝置 · 不上傳任何伺服器</span>
+  </header>
+
+  <!-- 1. Upload -->
+  <section class="panel">
+    <div class="panel-head">
+      <span class="panel-num">1</span>
+      <span class="panel-title">放上你的檔案<span class="en">UPLOAD</span></span>
+    </div>
+    <div class="panel-body">
+      <div class="encoding-bar">
+        <span class="lbl">編碼</span>
+        <select id="encoding" title="中文檔常見 Big5（繁中）或 GBK（簡中），讀到亂碼時切換看看">
+          <option value="utf-8">UTF-8（預設）</option>
+          <option value="big5">Big5（繁體中文）</option>
+          <option value="gbk">GBK / GB18030（簡體中文）</option>
+        </select>
+        <span style="color:var(--ink-faint);font-size:12px">讀到亂碼時,換個編碼再上傳一次</span>
+      </div>
+      <div class="drop" id="drop">
+        <input type="file" id="file" accept=".csv,text/csv" class="hidden">
+        <div class="icon"></div>
+        <h3>把 CSV 拖進來</h3>
+        <p>或 <span class="browse">點這裡選檔案</span> · 只接受 .csv</p>
+      </div>
+      <div id="uploadMsg"></div>
+    </div>
+  </section>
+
+  <!-- 2. Preview -->
+  <section class="panel hidden" id="previewPanel">
+    <div class="panel-head">
+      <span class="panel-num">2</span>
+      <span class="panel-title">先核對資料<span class="en">PREVIEW</span></span>
+    </div>
+    <div class="panel-body">
+      <div class="meta-line" id="metaLine"></div>
+      <div class="table-scroll"><table id="previewTable"></table></div>
+      <p class="note">只顯示前 50 列供核對。型別由系統自動判斷,若判錯通常是資料夾雜了文字或空白。</p>
+    </div>
+  </section>
+
+  <!-- 3. Chart -->
+  <section class="panel hidden" id="chartPanel">
+    <div class="panel-head">
+      <span class="panel-num">3</span>
+      <span class="panel-title">繪製圖表<span class="en">PLOT</span></span>
+    </div>
+    <div class="panel-body">
+      <div class="types" id="types"></div>
+      <div class="field-row" id="controls"></div>
+      <div id="chartMsg"></div>
+      <div class="chart-card" style="margin-top:18px"><canvas id="canvas"></canvas></div>
+      <div class="chart-actions">
+        <button class="btn ghost" id="downloadBtn">下載圖表 PNG</button>
+      </div>
+    </div>
+  </section>
+
+  <footer>PLOTSHEET · 純前端 CSV 視覺化 · PapaParse + Chart.js</footer>
+</div>
+
+<script>
+const PALETTE = ['#1F6F5C','#C8553D','#3A6EA5','#B58B2E','#7B4B94','#4F9D69','#A23B72','#2C8C99'];
+const SCATTER_CAP = 5000;
+
+const state = { file:null, columns:[], rows:[], chart:null, type:'bar' };
+
+// ---- DOM ----
+const $ = id => document.getElementById(id);
+const drop = $('drop'), fileInput = $('file');
+
+// ---- Upload wiring ----
+drop.addEventListener('click', ()=>fileInput.click());
+drop.addEventListener('dragover', e=>{e.preventDefault();drop.classList.add('drag')});
+drop.addEventListener('dragleave', ()=>drop.classList.remove('drag'));
+drop.addEventListener('drop', e=>{
+  e.preventDefault();drop.classList.remove('drag');
+  if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e=>{ if(e.target.files.length) handleFile(e.target.files[0]); });
+$('encoding').addEventListener('change', ()=>{ if(state.file) handleFile(state.file); });
+
+function showErr(where,text){ $(where).innerHTML = `<div class="msg err">${text}</div>`; }
+function clearMsg(where){ $(where).innerHTML=''; }
+
+function handleFile(file){
+  clearMsg('uploadMsg');
+  if(!/\.csv$/i.test(file.name) && file.type!=='text/csv'){
+    showErr('uploadMsg','這看起來不是 CSV 檔。請選擇副檔名為 .csv 的檔案。');
+    return;
+  }
+  state.file = file;
+  const reader = new FileReader();
+  reader.onload = e=>{
+    let text;
+    try{
+      const enc = $('encoding').value;
+      text = new TextDecoder(enc, {fatal:false}).decode(new Uint8Array(e.target.result));
+    }catch(err){
+      showErr('uploadMsg','無法以選定的編碼讀取檔案,換個編碼再試一次。');
+      return;
+    }
+    parseCSV(text, file.name);
+  };
+  reader.onerror = ()=>showErr('uploadMsg','讀取檔案時發生問題,請再試一次。');
+  reader.readAsArrayBuffer(file);
+}
+
+function parseCSV(text, name){
+  const res = Papa.parse(text, {header:true, skipEmptyLines:'greedy', transformHeader:h=>h.trim()});
+  let fields = (res.meta.fields||[]).filter(f=>f!=='');
+  const rows = res.data.filter(r => fields.some(f => r[f]!==undefined && r[f]!==''));
+  if(!fields.length || !rows.length){
+    showErr('uploadMsg','檔案裡沒有讀到可用的資料列,確認一下第一行是欄位名稱、且檔案不是空的。');
+    return;
+  }
+  state.columns = fields.map(f => ({name:f, type: detectType(rows.map(r=>r[f]))}));
+  state.rows = rows;
+  renderPreview(name);
+  buildChartUI();
+  $('previewPanel').classList.remove('hidden');
+  $('chartPanel').classList.remove('hidden');
+}
+
+// ---- Type detection ----
+function toNum(v){
+  if(v===null||v===undefined) return NaN;
+  const s = String(v).trim().replace(/[,\s]/g,'').replace(/[%$￥¥€£]/g,'');
+  if(s==='') return NaN;
+  return Number(s);
+}
+function looksLikeDate(v){
+  const s = String(v).trim();
+  if(s.length < 4) return false;
+  if(!/[-/.年]/.test(s) && !/^\d{4}$/.test(s)) return false;
+  const norm = s.replace(/年|月/g,'/').replace(/日/g,'');
+  return !isNaN(Date.parse(norm));
+}
+function detectType(values){
+  const sample = values.filter(v=>v!=='' && v!=null).slice(0,300);
+  if(!sample.length) return 'text';
+  let num=0, date=0;
+  for(const v of sample){
+    if(!isNaN(toNum(v))) num++;
+    else if(looksLikeDate(v)) date++;
+  }
+  if(num/sample.length >= 0.8) return 'number';
+  if(date/sample.length >= 0.8) return 'date';
+  return 'text';
+}
+const typeLabel = {number:'數值', date:'日期', text:'文字'};
+
+// ---- Preview ----
+function renderPreview(name){
+  const {columns, rows} = state;
+  $('metaLine').innerHTML =
+    `檔案 <b>${escapeHtml(name)}</b> · <b>${rows.length.toLocaleString()}</b> 列 · <b>${columns.length}</b> 欄`;
+  const head = '<thead><tr>' + columns.map(c =>
+    `<th><span class="col-name">${escapeHtml(c.name)}</span><span class="col-type t-${c.type}">${typeLabel[c.type]}</span></th>`
+  ).join('') + '</tr></thead>';
+  const body = '<tbody>' + rows.slice(0,50).map(r =>
+    '<tr>' + columns.map(c => {
+      const v = r[c.name] ?? '';
+      const cls = c.type==='number' ? ' class="num"' : '';
+      return `<td${cls}>${escapeHtml(String(v))}</td>`;
+    }).join('') + '</tr>'
+  ).join('') + '</tbody>';
+  $('previewTable').innerHTML = head + body;
+}
+function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+
+// ---- Chart UI ----
+const CHART_TYPES = [
+  {id:'bar', label:'長條圖'},
+  {id:'line', label:'折線圖'},
+  {id:'pie', label:'圓餅圖'},
+  {id:'scatter', label:'散佈圖'},
+  {id:'histogram', label:'直方圖'},
+];
+function numCols(){ return state.columns.filter(c=>c.type==='number'); }
+function catCols(){ return state.columns.filter(c=>c.type!=='number'); }
+
+function recommend(){
+  const nums = numCols(), cats = catCols();
+  const dateCol = state.columns.find(c=>c.type==='date');
+  if(dateCol && nums.length) return 'line';
+  if(cats.length && nums.length) return 'bar';
+  if(nums.length >= 2) return 'scatter';
+  if(nums.length === 1) return 'histogram';
+  return 'bar';
+}
+
+function buildChartUI(){
+  state.type = recommend();
+  const wrap = $('types');
+  wrap.innerHTML = '';
+  CHART_TYPES.forEach(t=>{
+    const b = document.createElement('button');
+    b.className = 'type-btn' + (t.id===state.type?' on':'');
+    b.innerHTML = t.label + (t.id===recommend()?' <span class="rec">建議</span>':'');
+    b.onclick = ()=>{ state.type=t.id; document.querySelectorAll('.type-btn').forEach(x=>x.classList.remove('on')); b.classList.add('on'); buildControls(); };
+    wrap.appendChild(b);
+  });
+  buildControls();
+}
+
+function selectField(labelText, options, id){
+  const opts = options.map(o=>`<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
+  return `<div class="field"><label>${labelText}</label><select id="${id}">${opts}</select></div>`;
+}
+
+function buildControls(){
+  const c = $('controls');
+  const nums = numCols().map(x=>x.name);
+  const cats = catCols().map(x=>x.name);
+  const all = state.columns.map(x=>x.name);
+  const t = state.type;
+  let html = '';
+
+  if(t==='bar' || t==='line'){
+    const xOpts = (t==='line' && state.columns.some(x=>x.type==='date'))
+      ? state.columns.filter(x=>x.type==='date'||x.type==='text').map(x=>x.name).concat(nums)
+      : all;
+    html += selectField('X 軸（類別）', all, 'xSel');
+    html += `<div class="field" style="min-width:220px"><label>Y 軸（數值，可多選）</label><div class="ychips" id="yChips"></div></div>`;
+    html += selectField('彙總方式', ['加總','平均','計數','不彙總（原始值）'], 'aggSel');
+  } else if(t==='pie'){
+    html += selectField('類別', all, 'xSel');
+    html += selectField('數值', nums.length?nums:all, 'ySel');
+    html += selectField('彙總方式', ['加總','平均','計數'], 'aggSel');
+  } else if(t==='scatter'){
+    html += selectField('X 軸（數值）', nums.length?nums:all, 'xSel');
+    html += selectField('Y 軸（數值）', nums.length?nums:all, 'ySel');
+  } else if(t==='histogram'){
+    html += selectField('欄位（數值）', nums.length?nums:all, 'xSel');
+    html += `<div class="field"><label>分組數</label><input type="number" id="bins" value="10" min="2" max="50"></div>`;
+  }
+  c.innerHTML = html;
+
+  // default selections
+  if(t==='bar'||t==='line'){
+    const xSel = $('xSel');
+    const firstCat = cats[0] || all[0];
+    xSel.value = firstCat;
+    // y chips
+    const yChips = $('yChips');
+    const yCandidates = nums.length?nums:all;
+    yChips.innerHTML = yCandidates.map((n,i)=>
+      `<span class="ychip${i===0?' on':''}" data-y="${escapeHtml(n)}"><span class="sw"></span>${escapeHtml(n)}</span>`
+    ).join('');
+    yChips.querySelectorAll('.ychip').forEach(ch=>{
+      ch.onclick = ()=>{ ch.classList.toggle('on'); render(); };
+    });
+  } else if(t==='pie'){
+    $('xSel').value = cats[0] || all[0];
+  } else if(t==='scatter'){
+    const opts = nums.length?nums:all;
+    $('xSel').value = opts[0]; $('ySel').value = opts[1]||opts[0];
+  }
+
+  // wire change events
+  c.querySelectorAll('select,input').forEach(el=>el.addEventListener('change', render));
+  render();
+}
+
+// ---- Aggregation helpers ----
+function groupLabels(rows, xCol){
+  const seen=new Set(), labels=[];
+  for(const r of rows){ const k=String(r[xCol]??''); if(!seen.has(k)){seen.add(k);labels.push(k);} }
+  return labels;
+}
+function aggSeries(rows, xCol, yCol, method, labels){
+  const acc = new Map(labels.map(l=>[l,{sum:0,count:0,valid:0}]));
+  for(const r of rows){
+    const k=String(r[xCol]??''); const m=acc.get(k); if(!m) continue;
+    m.count++; const y=toNum(r[yCol]); if(!isNaN(y)){m.sum+=y;m.valid++;}
+  }
+  return labels.map(l=>{const m=acc.get(l);
+    if(method==='平均') return m.valid? m.sum/m.valid : 0;
+    if(method==='計數') return m.count;
+    return m.sum;
+  });
+}
+function fmt(n){
+  if(!isFinite(n)) return '';
+  if(Math.abs(n)>=1000) return Math.round(n).toLocaleString();
+  return Math.round(n*100)/100;
+}
+
+// ---- Render ----
+function render(){
+  clearMsg('chartMsg');
+  const t = state.type, rows = state.rows;
+  let cfg;
+  try{
+    if(t==='bar'||t==='line'){
+      const xCol = $('xSel').value;
+      const yCols = [...$('yChips').querySelectorAll('.ychip.on')].map(c=>c.dataset.y);
+      const method = $('aggSel').value;
+      if(!yCols.length){ showErr('chartMsg','至少選一個 Y 軸數值欄位。'); return; }
+      let labels, datasets;
+      if(method==='不彙總（原始值）'){
+        labels = rows.map(r=>String(r[xCol]??''));
+        datasets = yCols.map((y,i)=>mkDataset(t,y,rows.map(r=>toNum(r[y])),i));
+      }else{
+        labels = groupLabels(rows, xCol);
+        if(state.columns.find(c=>c.name===xCol)?.type!=='text' || t==='line'){
+          labels = sortLabels(labels, xCol);
+        }
+        datasets = yCols.map((y,i)=>mkDataset(t,y,aggSeries(rows,xCol,y,method,labels),i));
+      }
+      cfg = {type:t, data:{labels,datasets}, options:baseOptions(true)};
+    }
+    else if(t==='pie'){
+      const xCol=$('xSel').value, yCol=$('ySel').value, method=$('aggSel').value;
+      let labels = groupLabels(rows,xCol);
+      let vals = aggSeries(rows,xCol,yCol,method,labels);
+      // top 8 + others
+      const pairs = labels.map((l,i)=>[l,vals[i]]).sort((a,b)=>b[1]-a[1]);
+      let top=pairs.slice(0,8);
+      if(pairs.length>8){ const rest=pairs.slice(8).reduce((s,p)=>s+p[1],0); top.push(['其他',rest]); }
+      cfg = {type:'pie', data:{labels:top.map(p=>p[0]), datasets:[{data:top.map(p=>p[1]),
+        backgroundColor:top.map((_,i)=>PALETTE[i%PALETTE.length]), borderColor:'#FCFDFA', borderWidth:2}]},
+        options:baseOptions(false)};
+    }
+    else if(t==='scatter'){
+      const xCol=$('xSel').value, yCol=$('ySel').value;
+      let pts = rows.map(r=>({x:toNum(r[xCol]),y:toNum(r[yCol])})).filter(p=>!isNaN(p.x)&&!isNaN(p.y));
+      let sampled=false;
+      if(pts.length>SCATTER_CAP){ pts = sampleArr(pts,SCATTER_CAP); sampled=true; }
+      cfg = {type:'scatter', data:{datasets:[{label:`${yCol} vs ${xCol}`, data:pts,
+        backgroundColor:hexA(PALETTE[0],.55), borderColor:PALETTE[0]}]},
+        options:Object.assign(baseOptions(true),{scales:axisScales(xCol,yCol)})};
+      if(sampled) $('chartMsg').innerHTML = `<p class="note">資料點較多,已隨機抽樣 ${SCATTER_CAP.toLocaleString()} 點繪製（共 ${pts.length>SCATTER_CAP?'':''}${rows.length.toLocaleString()} 列）。</p>`;
+    }
+    else if(t==='histogram'){
+      const col=$('xSel').value; let bins=parseInt($('bins').value)||10; bins=Math.max(2,Math.min(50,bins));
+      const h = histogram(rows,col,bins);
+      cfg = {type:'bar', data:{labels:h.labels, datasets:[{label:`${col} 次數分布`, data:h.counts,
+        backgroundColor:hexA(PALETTE[0],.8), borderColor:PALETTE[0], borderWidth:1, barPercentage:1, categoryPercentage:1}]},
+        options:baseOptions(true)};
+    }
+    draw(cfg);
+  }catch(err){
+    showErr('chartMsg','繪製時發生問題,換個欄位組合試試。');
+    console.error(err);
+  }
+}
+
+function mkDataset(type,label,data,i){
+  const col = PALETTE[i%PALETTE.length];
+  if(type==='line') return {label,data,borderColor:col,backgroundColor:hexA(col,.12),tension:.25,pointRadius:2,borderWidth:2,fill:false};
+  return {label,data,backgroundColor:hexA(col,.85),borderColor:col,borderWidth:1};
+}
+function sortLabels(labels,xCol){
+  const type = state.columns.find(c=>c.name===xCol)?.type;
+  if(type==='number') return labels.slice().sort((a,b)=>toNum(a)-toNum(b));
+  if(type==='date') return labels.slice().sort((a,b)=>Date.parse(String(a).replace(/年|月/g,'/').replace(/日/g,'')) - Date.parse(String(b).replace(/年|月/g,'/').replace(/日/g,'')));
+  return labels;
+}
+function histogram(rows,col,bins){
+  const vals = rows.map(r=>toNum(r[col])).filter(v=>!isNaN(v));
+  if(!vals.length) return {labels:[],counts:[]};
+  const min=Math.min(...vals), max=Math.max(...vals);
+  if(min===max) return {labels:[String(min)],counts:[vals.length]};
+  const w=(max-min)/bins, counts=new Array(bins).fill(0);
+  for(const v of vals){ let i=Math.floor((v-min)/w); if(i>=bins)i=bins-1; if(i<0)i=0; counts[i]++; }
+  const labels=counts.map((_,i)=>`${fmt(min+i*w)}–${fmt(min+(i+1)*w)}`);
+  return {labels,counts};
+}
+function sampleArr(arr,n){
+  const a=arr.slice(); for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
+  return a.slice(0,n);
+}
+function hexA(hex,a){const n=parseInt(hex.slice(1),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;}
+
+function baseOptions(showLegendAware){
+  return {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{
+      legend:{display:showLegendAware!==false, labels:{font:{family:"'JetBrains Mono',monospace",size:12}, color:'#5C6670', boxWidth:14}},
+    },
+    scales: undefined,
+  };
+}
+function axisScales(x,y){
+  return {x:{title:{display:true,text:x,font:{family:"'JetBrains Mono',monospace"}},grid:{color:'#E5EADD'}},
+          y:{title:{display:true,text:y,font:{family:"'JetBrains Mono',monospace"}},grid:{color:'#E5EADD'}}};
+}
+
+function draw(cfg){
+  Chart.defaults.font.family = "'Noto Sans TC',sans-serif";
+  Chart.defaults.color = '#5C6670';
+  // gridline default for category charts
+  if(!cfg.options.scales && cfg.type!=='pie'){
+    cfg.options.scales = {x:{grid:{color:'#E5EADD'},ticks:{font:{size:11}}}, y:{grid:{color:'#E5EADD'},beginAtZero:true}};
+  }
+  if(state.chart) state.chart.destroy();
+  state.chart = new Chart($('canvas').getContext('2d'), cfg);
+}
+
+$('downloadBtn').addEventListener('click', ()=>{
+  if(!state.chart) return;
+  const a=document.createElement('a');
+  a.href = state.chart.toBase64Image('image/png',1);
+  a.download = 'plotsheet.png'; a.click();
+});
+</script>
+</body>
+</html>
