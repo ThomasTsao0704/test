@@ -188,7 +188,7 @@
 <script>
 const PALETTE=['#1F6F5C','#C8553D','#3A6EA5','#B58B2E','#7B4B94','#4F9D69','#A23B72','#2C8C99','#6B7A8F','#D38B3E'];
 const SCATTER_CAP=5000;
-const LW={'細':1.25,'中':2.25,'粗':3.5};
+const POINTS={'• 小圓點':{s:'circle',r:2},'● 大圓點':{s:'circle',r:5},'— 短線':{s:'dash',r:5},'＋ 十字':{s:'cross',r:6},'■ 方塊':{s:'rect',r:4},'無（不顯示）':{s:'circle',r:0}};
 const $=id=>document.getElementById(id);
 const state={file:null,columns:[],rows:[],dual:false,views:{
   A:{type:'bar',chart:null,colors:{},built:false},
@@ -236,6 +236,7 @@ function parseCSV(text,name){
   $('previewPanel').classList.remove('hidden');
   $('chartPanel').classList.remove('hidden');
   buildView('A');
+  if(state.dual)buildView('B');
 }
 
 /* ---------- type detect ---------- */
@@ -317,7 +318,7 @@ function buildControls(v){
     h+=selField('分組欄位（系列）',['（無）',...cats,...nums],`grpSel_${v}`);
     h+=selField('多系列排列',['並排','堆疊'],`combineSel_${v}`);
     h+=selField('彙總方式',['加總','平均','計數','不彙總（原始值）'],`aggSel_${v}`);
-    if(t==='line')h+=selField('線條粗細',['細','中','粗'],`lwSel_${v}`);
+    if(t==='line'){h+=`<div class="field"><label>線條粗細 (px)</label><input type="number" id="lwNum_${v}" value="1.5" min="0.5" max="8" step="0.5"></div>`;h+=selField('資料點樣式',Object.keys(POINTS),`ptSel_${v}`);}
   }else if(t==='pie'){
     h+=selField('類別',all,`xSel_${v}`);h+=selField('數值',nums.length?nums:all,`ySel_${v}`);h+=selField('彙總方式',['加總','平均','計數'],`aggSel_${v}`);
   }else if(t==='scatter'){
@@ -366,7 +367,8 @@ function render(v){
       const xCol=gid('xSel',v).value;
       const yCols=[...gid('yChips',v).querySelectorAll('.ychip.on')].map(c=>c.dataset.y);
       const method=gid('aggSel',v).value,grp=gid('grpSel',v).value,combine=gid('combineSel',v).value;
-      const lw=t==='line'?LW[gid('lwSel',v).value]:1;
+      const lw=t==='line'?(parseFloat(gid('lwNum',v).value)||1.5):1;
+      const ptKey=t==='line'?gid('ptSel',v).value:null;
       if(!yCols.length){showErr(`msg_${v}`,'至少選一個 Y 軸數值欄位。');return}
       let labels,datasets;
       if(grp&&grp!=='（無）'){
@@ -374,14 +376,14 @@ function render(v){
         const groups=groupLabels(rows,grp);
         const mat=pivot(rows,xCol,grp,yCols[0],method==='不彙總（原始值）'?'加總':method,labels,groups);
         seriesLabels=groups;
-        datasets=groups.map((g,i)=>mkDS(t,g,mat[i],colorFor(v,g,i),lw,combine==='堆疊'));
+        datasets=groups.map((g,i)=>mkDS(t,g,mat[i],colorFor(v,g,i),lw,combine==='堆疊',ptKey));
         $(`msg_${v}`).innerHTML=`<p class="note">已依「${escapeHtml(grp)}」分成 ${groups.length} 個系列,數值取第一個 Y 欄位「${escapeHtml(yCols[0])}」。</p>`;
       }else if(method==='不彙總（原始值）'){
         labels=rows.map(r=>String(r[xCol]??''));seriesLabels=yCols;
-        datasets=yCols.map((y,i)=>mkDS(t,y,rows.map(r=>toNum(r[y])),colorFor(v,y,i),lw,combine==='堆疊'));
+        datasets=yCols.map((y,i)=>mkDS(t,y,rows.map(r=>toNum(r[y])),colorFor(v,y,i),lw,combine==='堆疊',ptKey));
       }else{
         labels=sortLabels(groupLabels(rows,xCol),xCol);seriesLabels=yCols;
-        datasets=yCols.map((y,i)=>mkDS(t,y,aggSeries(rows,xCol,y,method,labels),colorFor(v,y,i),lw,combine==='堆疊'));
+        datasets=yCols.map((y,i)=>mkDS(t,y,aggSeries(rows,xCol,y,method,labels),colorFor(v,y,i),lw,combine==='堆疊',ptKey));
       }
       cfg={type:t,data:{labels,datasets},options:baseOpts(true,combine==='堆疊')};
     }
@@ -410,8 +412,13 @@ function render(v){
   }catch(err){showErr(`msg_${v}`,'繪製時發生問題,換個欄位組合試試。');console.error(err)}
 }
 
-function mkDS(type,label,data,color,lw,stacked){
-  if(type==='line')return{label,data,borderColor:color,backgroundColor:hexA(color,.12),borderWidth:lw,tension:.25,pointRadius:1.5,pointHoverRadius:4,fill:stacked};
+function mkDS(type,label,data,color,lw,stacked,ptKey){
+  if(type==='line'){
+    const pt=POINTS[ptKey]||POINTS['• 小圓點'];
+    return{label,data,borderColor:color,backgroundColor:hexA(color,.12),borderWidth:lw,tension:.25,fill:stacked,
+      pointStyle:pt.s,pointRadius:pt.r,pointHoverRadius:pt.r?pt.r+2:0,
+      pointBackgroundColor:color,pointBorderColor:color,pointBorderWidth:Math.max(1.5,lw)};
+  }
   return{label,data,backgroundColor:hexA(color,.85),borderColor:color,borderWidth:1};
 }
 function baseOpts(legend,stacked){
@@ -426,7 +433,8 @@ function draw(v,cfg){
   state.views[v].chart=new Chart($(`canvas_${v}`).getContext('2d'),cfg);
 }
 function renderColors(v,labels){
-  const box=gid('colors',v);if(!labels.length){box.innerHTML='';return}
+  const box=gid('colors',v);if(!labels.length){box.innerHTML='';state.views[v]._csig='';return}
+  const sig=labels.join('|');if(state.views[v]._csig===sig)return;state.views[v]._csig=sig;
   box.innerHTML='<span class="clbl">配色（點色塊調整）</span>'+labels.map((l,i)=>{
     const c=colorFor(v,l,i);
     return `<span class="color-item"><input type="color" value="${c}" data-label="${escapeHtml(l)}"><span>${escapeHtml(l)}</span></span>`;
