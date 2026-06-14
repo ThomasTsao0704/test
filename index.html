@@ -188,7 +188,7 @@
 <script>
 const PALETTE=['#1F6F5C','#C8553D','#3A6EA5','#B58B2E','#7B4B94','#4F9D69','#A23B72','#2C8C99','#6B7A8F','#D38B3E'];
 const SCATTER_CAP=5000;
-const POINTS={'• 小圓點':{s:'circle',r:2},'● 大圓點':{s:'circle',r:5},'— 短線':{s:'dash',r:5},'＋ 十字':{s:'cross',r:6},'■ 方塊':{s:'rect',r:4},'無（不顯示）':{s:'circle',r:0}};
+const POINTS={'• 小圓點':{s:'circle',r:2},'● 大圓點':{s:'circle',r:5},'— 短線':{s:'dash',r:5},'＋ 十字':{s:'cross',r:6},'■ 方塊':{s:'rect',r:4}};
 const $=id=>document.getElementById(id);
 const state={file:null,columns:[],rows:[],dual:false,views:{
   A:{type:'bar',chart:null,colors:{},built:false},
@@ -256,7 +256,7 @@ function renderPreview(name){
 function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 
 /* ---------- columns helpers ---------- */
-const CHART_TYPES=[{id:'bar',label:'長條圖'},{id:'line',label:'折線圖'},{id:'pie',label:'圓餅圖'},{id:'scatter',label:'散佈圖'},{id:'histogram',label:'直方圖'}];
+const CHART_TYPES=[{id:'bar',label:'長條圖'},{id:'line',label:'折線圖'},{id:'points',label:'資料圓點圖'},{id:'pie',label:'圓餅圖'},{id:'scatter',label:'散佈圖'},{id:'histogram',label:'直方圖'}];
 const numCols=()=>state.columns.filter(c=>c.type==='number');
 const catCols=()=>state.columns.filter(c=>c.type!=='number');
 function recommend(){const n=numCols(),c=catCols(),d=state.columns.find(x=>x.type==='date');if(d&&n.length)return'line';if(c.length&&n.length)return'bar';if(n.length>=2)return'scatter';if(n.length===1)return'histogram';return'bar'}
@@ -312,13 +312,14 @@ function buildControls(v){
   const c=gid('controls',v),t=state.views[v].type;
   const nums=numCols().map(x=>x.name),cats=catCols().map(x=>x.name),all=state.columns.map(x=>x.name);
   let h='';
-  if(t==='bar'||t==='line'){
+  if(t==='bar'||t==='line'||t==='points'){
     h+=selField('X 軸（類別）',all,`xSel_${v}`);
     h+=`<div class="field" style="min-width:200px"><label>Y 軸（數值，可多選）</label><div class="ychips" id="yChips_${v}"></div></div>`;
     h+=selField('分組欄位（系列）',['（無）',...cats,...nums],`grpSel_${v}`);
-    h+=selField('多系列排列',['並排','堆疊'],`combineSel_${v}`);
+    if(t==='bar'||t==='line')h+=selField('多系列排列',['並排','堆疊'],`combineSel_${v}`);
     h+=selField('彙總方式',['加總','平均','計數','不彙總（原始值）'],`aggSel_${v}`);
-    if(t==='line'){h+=`<div class="field"><label>線條粗細 (px)</label><input type="number" id="lwNum_${v}" value="1.5" min="0.5" max="8" step="0.5"></div>`;h+=selField('資料點樣式',Object.keys(POINTS),`ptSel_${v}`);}
+    if(t==='line')h+=`<div class="field"><label>線條粗細 (px)</label><input type="number" id="lwNum_${v}" value="1.5" min="0.5" max="8" step="0.5"></div>`;
+    if(t==='points')h+=selField('資料點樣式',Object.keys(POINTS),`ptSel_${v}`);
   }else if(t==='pie'){
     h+=selField('類別',all,`xSel_${v}`);h+=selField('數值',nums.length?nums:all,`ySel_${v}`);h+=selField('彙總方式',['加總','平均','計數'],`aggSel_${v}`);
   }else if(t==='scatter'){
@@ -328,11 +329,12 @@ function buildControls(v){
   }
   c.innerHTML=h;
   // defaults + wiring
-  if(t==='bar'||t==='line'){
+  if(t==='bar'||t==='line'||t==='points'){
     gid('xSel',v).value=cats[0]||all[0];
     const yc=nums.length?nums:all,yChips=gid('yChips',v);
     yChips.innerHTML=yc.map((n,i)=>`<span class="ychip${i===0?' on':''}" data-y="${escapeHtml(n)}"><span class="sw"></span>${escapeHtml(n)}</span>`).join('');
     yChips.querySelectorAll('.ychip').forEach(ch=>ch.onclick=()=>{ch.classList.toggle('on');render(v)});
+    if(t==='points')gid('ptSel',v).value='● 大圓點';
   }else if(t==='pie'){gid('xSel',v).value=cats[0]||all[0];}
   else if(t==='scatter'){const o=nums.length?nums:all;gid('xSel',v).value=o[0];gid('ySel',v).value=o[1]||o[0];}
   c.querySelectorAll('select,input').forEach(el=>el.addEventListener('change',()=>render(v)));
@@ -363,12 +365,13 @@ function render(v){
   clearMsg(`msg_${v}`);
   const t=state.views[v].type,rows=state.rows;let cfg,seriesLabels=[];
   try{
-    if(t==='bar'||t==='line'){
+    if(t==='bar'||t==='line'||t==='points'){
       const xCol=gid('xSel',v).value;
       const yCols=[...gid('yChips',v).querySelectorAll('.ychip.on')].map(c=>c.dataset.y);
-      const method=gid('aggSel',v).value,grp=gid('grpSel',v).value,combine=gid('combineSel',v).value;
+      const method=gid('aggSel',v).value,grp=gid('grpSel',v).value;
+      const combine=(t==='bar'||t==='line')?gid('combineSel',v).value:'並排';
       const lw=t==='line'?(parseFloat(gid('lwNum',v).value)||1.5):1;
-      const ptKey=t==='line'?gid('ptSel',v).value:null;
+      const ptKey=t==='points'?gid('ptSel',v).value:null;
       if(!yCols.length){showErr(`msg_${v}`,'至少選一個 Y 軸數值欄位。');return}
       let labels,datasets;
       if(grp&&grp!=='（無）'){
@@ -385,7 +388,7 @@ function render(v){
         labels=sortLabels(groupLabels(rows,xCol),xCol);seriesLabels=yCols;
         datasets=yCols.map((y,i)=>mkDS(t,y,aggSeries(rows,xCol,y,method,labels),colorFor(v,y,i),lw,combine==='堆疊',ptKey));
       }
-      cfg={type:t,data:{labels,datasets},options:baseOpts(true,combine==='堆疊')};
+      cfg={type:(t==='bar')?'bar':'line',data:{labels,datasets},options:baseOpts(true,combine==='堆疊')};
     }
     else if(t==='pie'){
       const xCol=gid('xSel',v).value,yCol=gid('ySel',v).value,method=gid('aggSel',v).value;
@@ -414,10 +417,14 @@ function render(v){
 
 function mkDS(type,label,data,color,lw,stacked,ptKey){
   if(type==='line'){
-    const pt=POINTS[ptKey]||POINTS['• 小圓點'];
     return{label,data,borderColor:color,backgroundColor:hexA(color,.12),borderWidth:lw,tension:.25,fill:stacked,
-      pointStyle:pt.s,pointRadius:pt.r,pointHoverRadius:pt.r?pt.r+2:0,
-      pointBackgroundColor:color,pointBorderColor:color,pointBorderWidth:Math.max(1.5,lw)};
+      pointRadius:0,pointHoverRadius:4,pointHitRadius:8,pointBackgroundColor:color,pointBorderColor:color};
+  }
+  if(type==='points'){
+    const pt=POINTS[ptKey]||POINTS['● 大圓點'];
+    return{label,data,showLine:false,borderColor:color,backgroundColor:color,
+      pointStyle:pt.s,pointRadius:pt.r,pointHoverRadius:pt.r+2,
+      pointBackgroundColor:color,pointBorderColor:color,pointBorderWidth:2};
   }
   return{label,data,backgroundColor:hexA(color,.85),borderColor:color,borderWidth:1};
 }
