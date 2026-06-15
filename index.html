@@ -9,6 +9,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/12.4.2/math.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -100,9 +102,7 @@
   .view-tag.b{background:#3A6EA5}
   .view-body{padding:14px}
 
-  .chart-card{background-color:var(--paper-card);
-    background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
-    background-size:22px 22px;border:1px solid var(--line);border-radius:3px;padding:14px;position:relative;height:360px}
+  .chart-card{background:#FFFFFF;border:1px solid var(--line);border-radius:3px;padding:14px;position:relative;height:360px}
 
   .cond-row{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
   .cond-row:empty{display:none}
@@ -295,7 +295,9 @@ function buildView(v){
       <div class="colors" id="colors_${v}"></div>
       <div id="msg_${v}"></div>
       <div class="chart-card"><canvas id="canvas_${v}"></canvas></div>
+      <div class="note" style="margin-top:6px">滾輪縮放 · 拖曳平移 · 觸控雙指縮放</div>
       <div class="view-actions">
+        <button class="btn ghost" id="rz_${v}">重設縮放</button>
         <button class="btn ghost" id="dl_${v}">PNG</button>
         <button class="btn ghost" id="xlsx_${v}">匯出 Excel</button>
         <button class="btn ghost" id="setExp_${v}">匯出設定</button>
@@ -312,6 +314,7 @@ function buildView(v){
     b.onclick=()=>{state.views[v].type=t.id;tw.querySelectorAll('.type-btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');buildControls(v)};
     tw.appendChild(b);
   });
+  $(`rz_${v}`).addEventListener('click',()=>{const ch=state.views[v].chart;if(ch&&ch.resetZoom)ch.resetZoom()});
   $(`dl_${v}`).addEventListener('click',()=>{const ch=state.views[v].chart;if(!ch)return;const a=document.createElement('a');a.href=ch.toBase64Image('image/png',1);a.download=`plotsheet-${v}.png`;a.click()});
   $(`xlsx_${v}`).addEventListener('click',()=>exportXlsx(v));
   $(`setExp_${v}`).addEventListener('click',()=>exportSettings(v));
@@ -605,7 +608,7 @@ function render(v){
       let pairs=sorted.slice(0,topN);
       if(sorted.length>topN){const rest=sorted.slice(topN).reduce((s,p)=>s+p[1],0);pairs.push(['其他',rest])}
       seriesLabels=pairs.map(p=>p[0]);
-      cfg={type:'pie',data:{labels:seriesLabels,datasets:[{data:pairs.map(p=>p[1]),backgroundColor:seriesLabels.map((l,i)=>colorFor(v,l,i)),borderColor:'#FCFDFA',borderWidth:2}]},options:baseOpts(true,false)};
+      cfg={type:'pie',data:{labels:seriesLabels,datasets:[{data:pairs.map(p=>p[1]),backgroundColor:seriesLabels.map((l,i)=>colorFor(v,l,i)),borderColor:'#FCFDFA',borderWidth:2}]},options:baseOpts(true,false,false)};
     }
     else if(t==='scatter'){
       const xCol=gid('xSel',v).value,yCol=gid('ySel',v).value,label=`${yCol} vs ${xCol}`;
@@ -694,10 +697,12 @@ function mkDS(type,label,data,color,lw,stacked,ptKey){
   }
   return{label,data,backgroundColor:hexA(color,.85),borderColor:color,borderWidth:1};
 }
-function baseOpts(legend,stacked){
-  return{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+function baseOpts(legend,stacked,zoomable=true){
+  const o={responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
     plugins:{legend:{display:legend,labels:{font:{family:"'JetBrains Mono',monospace",size:11},color:'#5C6670',boxWidth:12}}},
     scales:stacked?{x:{stacked:true,grid:{color:'#E5EADD'},ticks:{font:{size:10}}},y:{stacked:true,beginAtZero:true,grid:{color:'#E5EADD'}}}:undefined};
+  if(zoomable)o.plugins.zoom={pan:{enabled:true,mode:'xy'},zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'xy'}};
+  return o;
 }
 function draw(v,cfg){
   Chart.defaults.font.family="'Noto Sans TC',sans-serif";Chart.defaults.color='#5C6670';
