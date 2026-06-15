@@ -9,6 +9,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/12.4.2/math.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --paper:#F6F7F1;--paper-card:#FCFDFA;--grid:#E5EADD;--grid-bold:#D6DDC9;
@@ -119,7 +121,7 @@
   .btn:hover{background:var(--accent);border-color:var(--accent)}
   .btn.ghost{background:transparent;color:var(--ink)}
   .btn.ghost:hover{background:var(--accent-soft);color:var(--accent-deep);border-color:var(--accent)}
-  .view-actions{display:flex;justify-content:flex-end;margin-top:10px}
+  .view-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:10px}
 
   .note{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-top:8px;line-height:1.5}
   .hidden{display:none!important}
@@ -231,6 +233,7 @@ function parseCSV(text,name){
   if(!fields.length||!rows.length){showErr('uploadMsg','檔案裡沒有讀到可用的資料列,確認第一行是欄位名稱、且檔案不是空的。');return}
   state.columns=fields.map(f=>({name:f,type:detectType(rows.map(r=>r[f]))}));
   state.rows=rows;
+  state._dataVersion=(state._dataVersion||0)+1;
   // reset views
   state.views.A={type:recommend(),chart:null,colors:{},built:false};
   state.views.B={type:recommend(),chart:null,colors:{},built:false};
@@ -255,7 +258,7 @@ function renderPreview(name){
   const body='<tbody>'+rows.slice(0,50).map(r=>'<tr>'+columns.map(c=>{const v=r[c.name]??'';return`<td${c.type==='number'?' class="num"':''}>${escapeHtml(String(v))}</td>`}).join('')+'</tr>').join('')+'</tbody>';
   $('previewTable').innerHTML=head+body;
 }
-function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 
 /* ---------- columns helpers ---------- */
 const CHART_TYPES=[{id:'bar',label:'長條圖'},{id:'line',label:'折線圖'},{id:'points',label:'資料圓點圖'},{id:'pie',label:'圓餅圖'},{id:'scatter',label:'散佈圖'},{id:'histogram',label:'直方圖'}];
@@ -292,7 +295,12 @@ function buildView(v){
       <div class="colors" id="colors_${v}"></div>
       <div id="msg_${v}"></div>
       <div class="chart-card"><canvas id="canvas_${v}"></canvas></div>
-      <div class="view-actions"><button class="btn ghost" id="dl_${v}">下載此視圖 PNG</button></div>
+      <div class="view-actions">
+        <button class="btn ghost" id="dl_${v}">PNG</button>
+        <button class="btn ghost" id="xlsx_${v}">匯出 Excel</button>
+        <button class="btn ghost" id="setExp_${v}">匯出設定</button>
+        <button class="btn ghost" id="setImp_${v}">匯入設定</button>
+      </div>
     </div>`;
   state.views[v].built=true;
   // type buttons
@@ -305,7 +313,47 @@ function buildView(v){
     tw.appendChild(b);
   });
   $(`dl_${v}`).addEventListener('click',()=>{const ch=state.views[v].chart;if(!ch)return;const a=document.createElement('a');a.href=ch.toBase64Image('image/png',1);a.download=`plotsheet-${v}.png`;a.click()});
+  $(`xlsx_${v}`).addEventListener('click',()=>exportXlsx(v));
+  $(`setExp_${v}`).addEventListener('click',()=>exportSettings(v));
+  $(`setImp_${v}`).addEventListener('click',()=>importSettings(v));
   buildControls(v);
+}
+
+const SET_IDS=['xSel','ySel','aggSel','grpSel','combineSel','lwNum','ptSel','bins','topN','dateAgg','trend','condOn','condOp','condVal','condVal2','condExpr','condColor','fOn','fCol','fOp','fTgt','fVal','fVal2','fCol2','fN','fGrp'];
+function exportXlsx(v){
+  if(typeof XLSX==='undefined'){alert('Excel 模組未載入,請檢查網路後重新整理。');return}
+  const rows=applyFilter(v,state.rows);
+  if(!rows.length){alert('目前篩選後沒有資料可匯出。');return}
+  const ws=XLSX.utils.json_to_sheet(rows,{header:state.columns.map(c=>c.name)});
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'篩選資料');
+  XLSX.writeFile(wb,`plotsheet-${v}-filtered.xlsx`);
+}
+function collectSettings(v){
+  const o={type:state.views[v].type,colors:{...state.views[v].colors},controls:{},
+    yChips:[...(gid('yChips',v)?gid('yChips',v).querySelectorAll('.ychip.on'):[])].map(c=>c.dataset.y)};
+  SET_IDS.forEach(id=>{const el=gid(id,v);if(el)o.controls[id]=el.value});
+  return o;
+}
+function exportSettings(v){
+  const blob=new Blob([JSON.stringify(collectSettings(v),null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`plotsheet-${v}-settings.json`;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function applySettings(v,o){
+  if(!o||typeof o!=='object')return;
+  state.views[v].type=o.type||state.views[v].type;
+  state.views[v].colors=o.colors||{};
+  buildView(v);
+  if(o.controls)Object.entries(o.controls).forEach(([id,val])=>{const el=gid(id,v);if(el)el.value=val});
+  ['fOp','fTgt','condOp'].forEach(id=>{const el=gid(id,v);if(el)el.dispatchEvent(new Event('change'))});
+  if(o.yChips){const yc=gid('yChips',v);if(yc)yc.querySelectorAll('.ychip').forEach(ch=>ch.classList.toggle('on',o.yChips.includes(ch.dataset.y)))}
+  state.views[v]._fcache=null;state.views[v]._csig='';
+  render(v);
+}
+function importSettings(v){
+  const inp=document.createElement('input');inp.type='file';inp.accept='.json,application/json';
+  inp.onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{applySettings(v,JSON.parse(ev.target.result))}catch(err){alert('設定檔讀取失敗,請確認是本工具匯出的 JSON。')}};r.readAsText(f)};
+  inp.click();
 }
 
 function selField(label,opts,id,extra=''){
@@ -324,10 +372,13 @@ function buildControls(v){
     h+=selField('彙總方式',['加總','平均','計數','不彙總（原始值）'],`aggSel_${v}`);
     if(t==='line')h+=`<div class="field"><label>線條粗細 (px)</label><input type="number" id="lwNum_${v}" value="1.5" min="0.5" max="8" step="0.5"></div>`;
     if(t==='points')h+=selField('資料點樣式',Object.keys(POINTS),`ptSel_${v}`);
+    h+=selField('日期彙總（X 為日期時）',['原始','按日','按月','按季','按年'],`dateAgg_${v}`);
   }else if(t==='pie'){
     h+=selField('類別',all,`xSel_${v}`);h+=selField('數值',nums.length?nums:all,`ySel_${v}`);h+=selField('彙總方式',['加總','平均','計數'],`aggSel_${v}`);
+    h+=`<div class="field"><label>顯示前 N 類</label><input type="number" id="topN_${v}" value="8" min="1" max="30"></div>`;
   }else if(t==='scatter'){
     h+=selField('X 軸（數值）',nums.length?nums:all,`xSel_${v}`);h+=selField('Y 軸（數值）',nums.length?nums:all,`ySel_${v}`);
+    h+=selField('趨勢線',['隱藏','顯示（線性回歸）'],`trend_${v}`);
   }else if(t==='histogram'){
     h+=selField('欄位（數值）',nums.length?nums:all,`xSel_${v}`);h+=`<div class="field"><label>分組數</label><input type="number" id="bins_${v}" value="10" min="2" max="50"></div>`;
   }
@@ -358,7 +409,8 @@ function buildFilter(v){
     <div class="field" id="fValWrap_${v}"><label>值</label><input type="text" id="fVal_${v}" placeholder="例如 1000 或 台北"></div>
     <div class="field hidden" id="fVal2Wrap_${v}"><label>到</label><input type="number" id="fVal2_${v}"></div>
     <div class="field hidden" id="fCol2Wrap_${v}"><label>比較欄位</label><select id="fCol2_${v}">${all.map(o=>`<option>${escapeHtml(o)}</option>`).join('')}</select></div>
-    <div class="field hidden" id="fNWrap_${v}"><label>筆數 N</label><input type="number" id="fN_${v}" value="5" min="1"></div>
+    <div class="field hidden" id="fNWrap_${v}"><label>筆數 N（每組）</label><input type="number" id="fN_${v}" value="1" min="1"></div>
+    <div class="field hidden" id="fGrpWrap_${v}"><label>分組（每組各取）</label><select id="fGrp_${v}"><option value="">（不分組）</option>${all.map(o=>`<option>${escapeHtml(o)}</option>`).join('')}</select></div>
     <span class="note" id="fmsg_${v}" style="width:100%"></span>`;
   const firstNum=numCols()[0];if(firstNum)gid('fCol',v).value=firstNum.name;
   const all2=state.columns.filter(c=>c.name!==(firstNum&&firstNum.name));if(all2[0])gid('fCol2',v).value=all2[0].name;
@@ -369,6 +421,7 @@ function buildFilter(v){
     gid('fVal2Wrap',v).classList.toggle('hidden',op!=='between'||tgt==='col');
     gid('fCol2Wrap',v).classList.toggle('hidden',mm||tgt!=='col');
     gid('fNWrap',v).classList.toggle('hidden',!mm);
+    gid('fGrpWrap',v).classList.toggle('hidden',!mm);
   };
   gid('fOp',v).addEventListener('change',sync);gid('fTgt',v).addEventListener('change',sync);sync();
   box.querySelectorAll('select,input').forEach(el=>{el.addEventListener('change',()=>render(v));if(el.type==='text')el.addEventListener('input',()=>render(v))});
@@ -378,12 +431,19 @@ function applyFilter(v,rows){
   const onEl=gid('fOn',v),note=gid('fmsg',v);
   if(!onEl||onEl.value!=='on'){if(note)note.textContent='';return rows}
   const col=gid('fCol',v).value,op=gid('fOp',v).value,tgt=gid('fTgt',v).value;
+  const sig=JSON.stringify([state._dataVersion,col,op,tgt,gid('fVal',v).value,gid('fVal2',v).value,gid('fCol2',v).value,gid('fN',v).value,gid('fGrp',v)&&gid('fGrp',v).value]);
+  const cache=state.views[v]._fcache;
+  if(cache&&cache.sig===sig){if(note)note.innerHTML=cache.note;return cache.out}
   let out;
   if(op==='max'||op==='min'){
     const n=Math.max(1,parseInt(gid('fN',v).value)||1);
-    const withNum=rows.map(r=>({r,n:toNum(r[col])})).filter(o=>!isNaN(o.n));
-    withNum.sort((a,b)=>op==='max'?b.n-a.n:a.n-b.n);
-    out=withNum.slice(0,n).map(o=>o.r);
+    const grp=gid('fGrp',v)?gid('fGrp',v).value:'';
+    const pick=arr=>{const w=arr.map(r=>({r,n:toNum(r[col])})).filter(o=>!isNaN(o.n));w.sort((a,b)=>op==='max'?b.n-a.n:a.n-b.n);return w.slice(0,n).map(o=>o.r)};
+    if(grp){
+      const groups=new Map();
+      for(const r of rows){const k=String(r[grp]??'');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r)}
+      out=[];for(const arr of groups.values())out.push(...pick(arr));
+    }else out=pick(rows);
   }else{
     const rawVal=(gid('fVal',v).value||'').trim(),val=Number(rawVal),val2=Number(gid('fVal2',v).value),col2=gid('fCol2',v).value;
     out=rows.filter(r=>{
@@ -398,11 +458,14 @@ function applyFilter(v,rows){
       return true;
     });
   }
+  let noteHtml='';
   if(note){
     const sym={'>':'>','>=':'≥','<':'<','<=':'≤','==':'=','!=':'≠','between':'介於'}[op];
-    const desc=(op==='max'||op==='min')?`取「${col}」${op==='max'?'最大':'最小'} ${Math.max(1,parseInt(gid('fN',v).value)||1)} 筆`:`「${col}」 ${sym} ${tgt==='col'?'「'+gid('fCol2',v).value+'」':(gid('fVal',v).value||'?')}`;
-    note.innerHTML=`篩選:${escapeHtml(desc)} → 顯示 <b>${out.length.toLocaleString()}</b> / ${rows.length.toLocaleString()} 列`;
+    const desc=(op==='max'||op==='min')?`${gid('fGrp',v)&&gid('fGrp',v).value?'依「'+gid('fGrp',v).value+'」分組,每組取':'取'}「${col}」${op==='max'?'最大':'最小'} ${Math.max(1,parseInt(gid('fN',v).value)||1)} 筆`:`「${col}」 ${sym} ${tgt==='col'?'「'+gid('fCol2',v).value+'」':(gid('fVal',v).value||'?')}`;
+    noteHtml=`篩選:${escapeHtml(desc)} → 顯示 <b>${out.length.toLocaleString()}</b> / ${rows.length.toLocaleString()} 列`;
+    note.innerHTML=noteHtml;
   }
+  state.views[v]._fcache={sig,out,note:noteHtml};
   return out;
 }
 
@@ -417,7 +480,7 @@ function buildCond(v){
       <select id="condOp_${v}">${ops.map(o=>`<option value="${o[0]}">${o[1]}</option>`).join('')}</select></div>
     <div class="field"><label>值</label><input type="text" id="condVal_${v}" placeholder="例如 1000 或 台北"></div>
     <div class="field condBetween hidden" id="condBetweenWrap_${v}"><label>到</label><input type="number" id="condVal2_${v}"></div>
-    <div class="field"><label>進階公式（選填）</label><input type="text" id="condExpr_${v}" placeholder="用 x、y，如 y>1000 && x!='其他'" style="min-width:210px"></div>
+    <div class="field"><label>進階公式（選填）</label><input type="text" id="condExpr_${v}" placeholder="用 x、y，如 y>1000 and x!=&quot;其他&quot;" style="min-width:210px"></div>
     <div class="field"><label>標記色</label><input type="color" id="condColor_${v}" value="#D9533B" style="-webkit-appearance:none;appearance:none;width:42px;height:36px;border:1.5px solid var(--line);border-radius:4px;padding:2px;cursor:pointer"></div>`;
   const toggleBetween=()=>{gid('condBetweenWrap',v).classList.toggle('hidden',gid('condOp',v).value!=='between')};
   gid('condOp',v).addEventListener('change',toggleBetween);
@@ -446,6 +509,57 @@ function sampleArr(a,n){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.f
 function fmt(n){if(!isFinite(n))return'';return Math.abs(n)>=1000?Math.round(n).toLocaleString():Math.round(n*100)/100}
 function hexA(hex,a){const n=parseInt(hex.slice(1),16);return`rgba(${n>>16&255},${n>>8&255},${n&255},${a})`}
 function colorFor(v,label,i){const map=state.views[v].colors;if(!map[label])map[label]=PALETTE[i%PALETTE.length];return map[label]}
+const colType=n=>state.columns.find(c=>c.name===n)?.type;
+function bucketDate(val,mode){
+  const d=new Date(String(val).replace(/年|月/g,'/').replace(/日/g,''));
+  if(isNaN(d))return String(val??'');
+  const y=d.getFullYear(),m=d.getMonth()+1;
+  if(mode==='按年')return''+y;
+  if(mode==='按季')return y+'-Q'+(Math.floor((m-1)/3)+1);
+  if(mode==='按月')return y+'-'+String(m).padStart(2,'0');
+  if(mode==='按日')return y+'-'+String(m).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  return String(val??'');
+}
+// Largest-Triangle-Three-Buckets：保留趨勢的降採樣（資料需先依 x 排序）
+function lttb(data,threshold){
+  const n=data.length;if(threshold>=n||threshold<3)return data.slice();
+  const out=[data[0]];const every=(n-2)/(threshold-2);let a=0;
+  for(let i=0;i<threshold-2;i++){
+    let rs=Math.floor((i+1)*every)+1,re=Math.min(Math.floor((i+2)*every)+1,n);
+    let avgX=0,avgY=0;const len=re-rs||1;
+    for(let j=rs;j<re;j++){avgX+=data[j].x;avgY+=data[j].y}avgX/=len;avgY/=len;
+    let ro=Math.floor(i*every)+1,rt=Math.floor((i+1)*every)+1;
+    const pa=data[a];let maxA=-1,next=ro;
+    for(let j=ro;j<rt;j++){
+      const area=Math.abs((pa.x-avgX)*(data[j].y-pa.y)-(pa.x-data[j].x)*(avgY-pa.y));
+      if(area>maxA){maxA=area;next=j}
+    }
+    out.push(data[next]);a=next;
+  }
+  out.push(data[n-1]);return out;
+}
+function linreg(pts){
+  const n=pts.length;if(n<2)return null;
+  let sx=0,sy=0,sxy=0,sxx=0,syy=0,minx=Infinity,maxx=-Infinity;
+  for(const p of pts){sx+=p.x;sy+=p.y;sxy+=p.x*p.y;sxx+=p.x*p.x;syy+=p.y*p.y;if(p.x<minx)minx=p.x;if(p.x>maxx)maxx=p.x}
+  const d=n*sxx-sx*sx;if(d===0)return null;
+  const slope=(n*sxy-sx*sy)/d,intercept=(sy-slope*sx)/n;
+  const den=Math.sqrt(d*(n*syy-sy*sy)),r=den?(n*sxy-sx*sy)/den:0;
+  return{slope,intercept,r2:r*r,minx,maxx};
+}
+function condIsActive(v){const o=gid('condOn',v);if(!o)return false;const e=(gid('condExpr',v)&&gid('condExpr',v).value||'').trim();return o.value!=='off'||!!e}
+function recolorInPlace(v){
+  const ch=state.views[v].chart,t=state.views[v].type;
+  if(!ch||condIsActive(v)){render(v);return}
+  const map=state.views[v].colors;
+  if(t==='pie'){ch.data.datasets[0].backgroundColor=ch.data.labels.map((l,i)=>map[l]||PALETTE[i%PALETTE.length])}
+  else ch.data.datasets.forEach(ds=>{const c=map[ds.label];if(!c)return;
+    if(t==='bar'||t==='histogram'){ds.backgroundColor=hexA(c,t==='histogram'?.8:.85);ds.borderColor=c}
+    else if(t==='line'){ds.borderColor=c;ds.backgroundColor=hexA(c,.12);ds.pointBackgroundColor=c;ds.pointBorderColor=c}
+    else{ds.borderColor=c;ds.backgroundColor=t==='scatter'?hexA(c,.5):c;ds.pointBackgroundColor=c;ds.pointBorderColor=c}
+  });
+  ch.update('none');
+}
 
 /* ---------- render ---------- */
 function render(v){
@@ -460,38 +574,54 @@ function render(v){
       const combine=(t==='bar'||t==='line')?gid('combineSel',v).value:'並排';
       const lw=t==='line'?(parseFloat(gid('lwNum',v).value)||1.5):1;
       const ptKey=t==='points'?gid('ptSel',v).value:null;
+      const dateAgg=gid('dateAgg',v)?gid('dateAgg',v).value:'原始';
       if(!yCols.length){showErr(`msg_${v}`,'至少選一個 Y 軸數值欄位。');return}
+      const useDate=dateAgg!=='原始'&&colType(xCol)==='date';
+      const drows=useDate?rows.map(r=>({...r,[xCol]:bucketDate(r[xCol],dateAgg)})):rows;
+      const sortL=labs=>useDate?labs.slice().sort():sortLabels(labs,xCol);
       let labels,datasets;
       if(grp&&grp!=='（無）'){
-        labels=sortLabels(groupLabels(rows,xCol),xCol);
-        const groups=groupLabels(rows,grp);
-        const mat=pivot(rows,xCol,grp,yCols[0],method==='不彙總（原始值）'?'加總':method,labels,groups);
+        labels=sortL(groupLabels(drows,xCol));
+        const groups=groupLabels(drows,grp);
+        const mat=pivot(drows,xCol,grp,yCols[0],method==='不彙總（原始值）'?'加總':method,labels,groups);
         seriesLabels=groups;
         datasets=groups.map((g,i)=>mkDS(t,g,mat[i],colorFor(v,g,i),lw,combine==='堆疊',ptKey));
         $(`msg_${v}`).innerHTML=`<p class="note">已依「${escapeHtml(grp)}」分成 ${groups.length} 個系列,數值取第一個 Y 欄位「${escapeHtml(yCols[0])}」。</p>`;
-      }else if(method==='不彙總（原始值）'){
-        labels=rows.map(r=>String(r[xCol]??''));seriesLabels=yCols;
-        datasets=yCols.map((y,i)=>mkDS(t,y,rows.map(r=>toNum(r[y])),colorFor(v,y,i),lw,combine==='堆疊',ptKey));
+      }else if(method==='不彙總（原始值）'&&!useDate){
+        labels=drows.map(r=>String(r[xCol]??''));seriesLabels=yCols;
+        datasets=yCols.map((y,i)=>mkDS(t,y,drows.map(r=>toNum(r[y])),colorFor(v,y,i),lw,combine==='堆疊',ptKey));
       }else{
-        labels=sortLabels(groupLabels(rows,xCol),xCol);seriesLabels=yCols;
-        datasets=yCols.map((y,i)=>mkDS(t,y,aggSeries(rows,xCol,y,method,labels),colorFor(v,y,i),lw,combine==='堆疊',ptKey));
+        labels=sortL(groupLabels(drows,xCol));seriesLabels=yCols;
+        const m2=method==='不彙總（原始值）'?'加總':method;
+        datasets=yCols.map((y,i)=>mkDS(t,y,aggSeries(drows,xCol,y,m2,labels),colorFor(v,y,i),lw,combine==='堆疊',ptKey));
       }
       cfg={type:(t==='bar')?'bar':'line',data:{labels,datasets},options:baseOpts(true,combine==='堆疊')};
     }
     else if(t==='pie'){
       const xCol=gid('xSel',v).value,yCol=gid('ySel',v).value,method=gid('aggSel',v).value;
+      const topN=Math.max(1,parseInt(gid('topN',v)&&gid('topN',v).value)||8);
       let labels=groupLabels(rows,xCol),vals=aggSeries(rows,xCol,yCol,method,labels);
-      let pairs=labels.map((l,i)=>[l,vals[i]]).sort((a,b)=>b[1]-a[1]).slice(0,8);
-      if(labels.length>8){const rest=labels.map((l,i)=>[l,vals[i]]).slice(8).reduce((s,p)=>s+p[1],0);pairs.push(['其他',rest])}
+      const sorted=labels.map((l,i)=>[l,vals[i]]).sort((a,b)=>b[1]-a[1]);
+      let pairs=sorted.slice(0,topN);
+      if(sorted.length>topN){const rest=sorted.slice(topN).reduce((s,p)=>s+p[1],0);pairs.push(['其他',rest])}
       seriesLabels=pairs.map(p=>p[0]);
       cfg={type:'pie',data:{labels:seriesLabels,datasets:[{data:pairs.map(p=>p[1]),backgroundColor:seriesLabels.map((l,i)=>colorFor(v,l,i)),borderColor:'#FCFDFA',borderWidth:2}]},options:baseOpts(true,false)};
     }
     else if(t==='scatter'){
       const xCol=gid('xSel',v).value,yCol=gid('ySel',v).value,label=`${yCol} vs ${xCol}`;
       let pts=rows.map(r=>({x:toNum(r[xCol]),y:toNum(r[yCol])})).filter(p=>!isNaN(p.x)&&!isNaN(p.y));
-      if(pts.length>SCATTER_CAP){pts=sampleArr(pts,SCATTER_CAP);$(`msg_${v}`).innerHTML=`<p class="note">資料點較多,已隨機抽樣 ${SCATTER_CAP.toLocaleString()} 點繪製。</p>`}
+      const reg=linreg(pts);
+      let plotPts=pts;
+      if(pts.length>SCATTER_CAP){plotPts=pts.slice().sort((a,b)=>a.x-b.x);plotPts=lttb(plotPts,SCATTER_CAP);$(`msg_${v}`).innerHTML=`<p class="note">資料點較多,已用 LTTB 降採樣至 ${SCATTER_CAP.toLocaleString()} 點(保留趨勢)。</p>`}
       seriesLabels=[label];const col=colorFor(v,label,0);
-      cfg={type:'scatter',data:{datasets:[{label,data:pts,backgroundColor:hexA(col,.5),borderColor:col,pointRadius:3}]},options:Object.assign(baseOpts(true,false),{scales:{x:{title:{display:true,text:xCol},grid:{color:'#E5EADD'}},y:{title:{display:true,text:yCol},grid:{color:'#E5EADD'}}}})};
+      const dss=[{label,data:plotPts,backgroundColor:hexA(col,.5),borderColor:col,pointRadius:3}];
+      const trend=gid('trend',v)?gid('trend',v).value:'隱藏';
+      if(trend!=='隱藏'&&reg){
+        dss.push({type:'line',label:`趨勢線 R²=${reg.r2.toFixed(3)}`,data:[{x:reg.minx,y:reg.slope*reg.minx+reg.intercept},{x:reg.maxx,y:reg.slope*reg.maxx+reg.intercept}],borderColor:'#185647',borderWidth:2,borderDash:[6,4],pointRadius:0,fill:false});
+        const sign=reg.intercept>=0?'+':'−';
+        $(`msg_${v}`).insertAdjacentHTML('beforeend',`<p class="note">線性回歸:y = ${reg.slope.toFixed(4)}·x ${sign} ${Math.abs(reg.intercept).toFixed(2)} ,R² = <b>${reg.r2.toFixed(3)}</b></p>`);
+      }
+      cfg={type:'scatter',data:{datasets:dss},options:Object.assign(baseOpts(true,false),{scales:{x:{title:{display:true,text:xCol},grid:{color:'#E5EADD'}},y:{title:{display:true,text:yCol},grid:{color:'#E5EADD'}}}})};
     }
     else if(t==='histogram'){
       const col=gid('xSel',v).value;let bins=parseInt(gid('bins',v).value)||10;bins=Math.max(2,Math.min(50,bins));
@@ -518,7 +648,11 @@ function applyConditionMaybe(v,t,cfg){
   const onSel=onEl.value,exprRaw=(gid('condExpr',v).value||'').trim();
   if(onSel==='off'&&!exprRaw)return;
   let fn=null;
-  if(exprRaw){try{fn=new Function('x','y','"use strict";return ('+exprRaw+')')}catch(e){$(`msg_${v}`).insertAdjacentHTML('beforeend',`<p class="note" style="color:var(--warn)">進階公式語法有誤,已略過標記。</p>`);return}}
+  if(exprRaw){
+    if(typeof math==='undefined'){$(`msg_${v}`).insertAdjacentHTML('beforeend',`<p class="note" style="color:var(--warn)">公式引擎未載入,略過進階公式。</p>`);return}
+    try{const code=math.parse(exprRaw).compile();fn=(x,y)=>code.evaluate({x,y})}
+    catch(e){$(`msg_${v}`).insertAdjacentHTML('beforeend',`<p class="note" style="color:var(--warn)">進階公式語法有誤,已略過標記。</p>`);return}
+  }
   const spec={on:onSel==='X'?'X':'Y',op:gid('condOp',v).value,val:Number(gid('condVal',v).value),val2:Number(gid('condVal2',v).value),rawVal:(gid('condVal',v).value||'').trim(),fn};
   const hi=gid('condColor',v).value||'#D9533B';
   let total=0;
@@ -578,7 +712,7 @@ function renderColors(v,labels){
     const c=colorFor(v,l,i);
     return `<span class="color-item"><input type="color" value="${c}" data-label="${escapeHtml(l)}"><span>${escapeHtml(l)}</span></span>`;
   }).join('');
-  box.querySelectorAll('input[type=color]').forEach(inp=>inp.addEventListener('input',e=>{state.views[v].colors[e.target.dataset.label]=e.target.value;render(v)}));
+  box.querySelectorAll('input[type=color]').forEach(inp=>inp.addEventListener('input',e=>{state.views[v].colors[e.target.dataset.label]=e.target.value;recolorInPlace(v)}));
 }
 </script>
 </body>
